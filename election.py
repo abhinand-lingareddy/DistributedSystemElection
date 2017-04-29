@@ -25,7 +25,7 @@ class election:
         self.is_master=False
         self.child=None
         zk.add_listener(self.stat_listener)
-        #creater a counter if not exsisting
+
 
 
     def find_parent(self,key):
@@ -39,8 +39,8 @@ class election:
             stat = self.zk.exists(key)
             if stat is not None:
                 return key
-    def key_string(self,num):
-        return self.key+str(num).zfill(10)
+    def get_key(self,num):
+        return self.path+str(num).zfill(10)
 
     def my_func(self,data, stat):
         print "entered"
@@ -53,14 +53,53 @@ class election:
                 print "parent " + self.parentkey
                 kazoo.recipe.watchers.DataWatch(self.zk, self.parentkey, func=self.my_func)
             return False
+
+
+    def watch_child(self,data, stat):
+        print "watch child"
+        if stat is None :
+            if self.child is not None:
+                lock = self.zk.Lock("/lockpath", self.value)
+                with lock:
+                    status,child_key=self.find_child()
+                    if not status:
+                        self.child=None
+                    print "watching child"+child_key
+                    kazoo.recipe.watchers.DataWatch(self.zk, child_key, func=self.watch_child)
+        else:
+            self.child=data
+            print self.childnum
+
+
+    def get_num(self,key):
+        return int(key[key.index(self.path) + len(self.path):])
+
+
+
+    def find_child(self):
+            print "entered find child"
+            end=self.zk.get("end")
+            end_num=self.get_num(str(end[0]))
+            print "end int"+str(end_num)
+            self.childnum=self.childnum+1
+            child_key = self.get_key(self.childnum)
+            while(self.childnum<=end_num):
+                stat=self.zk.exists(child_key)
+                if stat is not None:
+                    return True,child_key
+                self.childnum=self.childnum+1
+                child_key = self.get_key(self.childnum)
+            return False,child_key
+
+
     def perform(self):
         lock = self.zk.Lock("/lockpath", self.value)
 
         with lock:
             self.key=str(self.zk.create( self.path, self.value, ephemeral=True, makepath=True,sequence=True))
             print self.key
-            num=self.key[self.key.index(self.path)+len(self.path):]
-            childnum=int(num)+1
+            num=self.get_num(self.key)
+            self.childnum=int(num)+1
             end=self.zk.exists("end")
             if end is None:
                 self.zk.create("end",self.key)
@@ -77,23 +116,8 @@ class election:
             else:
                 self.is_master = False
                 kazoo.recipe.watchers.DataWatch(self.zk, self.parentkey, func=self.my_func)
-
-
-            # @kazoo.client.DataWatch(self.zk, self.parentkey)
-            # def watch_Sucessor(data, stat):
-            #     print "called on "+data
-            #     if stat is None:
-            #         print "called " + str(data)
-            #         self.parentkey = self.find_parent(self.parentkey)
-            #         if self.parentkey is None:
-            #             self.is_master = True
-            #         else:
-            #             kazoo.recipe.watchers.DataWatch(self.zk, self.parentkey, func=watch_Sucessor)
-            #         return False
-        #release lock
-
-
-
-
+            child_key=self.get_key(self.childnum)
+            print child_key
+            kazoo.recipe.watchers.DataWatch(self.zk,child_key , func=self.watch_child)
 
 
